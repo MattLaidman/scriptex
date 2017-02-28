@@ -33,7 +33,7 @@ string Segmenter::getIndex() {
 *
 * @param input - the path to the image as a string */
 vector<vector<int>> Segmenter::decode(string image) {
-	Decoder decoder(image, true);
+	Decoder decoder(image);
 	return decoder.getImage();
 }
 
