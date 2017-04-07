@@ -1,0 +1,3 @@
+"""
+SCRiPTeX characterrecognition module.
+"""
