@@ -21,6 +21,8 @@ class CharacterData {
 	private:
 		vector<vector<int> > pixelData; // pixel values
 		int area; // area of character
+        int width; // width of character
+        int height; // height of character
 		int position[2]; // position of character
 		int line; // line it was found on
 		int rindex; // R-Index value
@@ -30,9 +32,11 @@ class CharacterData {
 		CharacterData() {} // constructor
 		virtual ~CharacterData() {} // deconstructor
 		/* main setter */
-		void setPixels(vector<vector<int> > in, int pos[2], int ar, int li, int r, int sr) {
+		void setPixels(vector<vector<int> > in, int pos[2], int ar, int wi, int he, int li, int r, int sr) {
 			pixelData = in;
 			area = ar;
+            height = he;
+            width = wi;
 			position[0] = pos[0]; position[1] = pos[1];
 			line = li;
 			rindex = r, srindex = sr, sindex = 0;
@@ -47,10 +51,10 @@ class CharacterData {
 			return area;
 		}		
 		int getWidth() { // getter function for character width
-			return pixelData.size();
+			return width;
 		}
         int getHeight() { // getter function for character height
-            return getArea() / getWidth();
+            return height;
         }
 		int getLine() { // getter function for line number
 			return line;
@@ -99,6 +103,8 @@ class Segmenter {
         void normalizeAspect(vector<vector<int> >&);
         void affixWhiteRows(vector<vector<int> >&, int);
         void affixWhiteCols(vector<vector<int> >&, int);
+        void removeTopLine(vector<vector<int> >&);
+        vector<vector<int> > trimChars(vector<vector<int> >);
         void flipImage(vector<vector<int> >&);
         // functions to find black distribution of an image
         vector<int> findHorDistribution(vector<vector<int> >, int);
@@ -107,15 +113,15 @@ class Segmenter {
         int findVerThreshold(vector<vector<int> >);
         int findNumChars(vector<vector<int> >&, double);
         int findNumLines(vector<vector<int> >&, int);
+        int findPenWidth(vector<vector<int> >&);
         // geometry functions
         int findYPos(vector<vector<int> >&);
-        int findArea(vector<vector<int> >&, int);
-        int meanArea(list<CharacterData>&);
-        int sdArea(list<CharacterData>&);
-        int meanWidth(list<CharacterData>&);
-        int sdWidth(list<CharacterData>&);
-        int meanHeight(list<CharacterData>&);
-        int sdHeight(list<CharacterData>&);
+        unsigned int meanArea(list<CharacterData>&);
+        unsigned int sdArea(list<CharacterData>&);
+        unsigned int meanWidth(list<CharacterData>&);
+        unsigned int sdWidth(list<CharacterData>&);
+        unsigned int meanHeight(list<CharacterData>&);
+        unsigned int sdHeight(list<CharacterData>&);
         int getDistance(int, int);
         double findSlope(int*, int*);
         // for diagnostic purposes
@@ -131,6 +137,7 @@ bool firstSR = false;
 bool kFlag = false;
 bool train;
 bool release;
+bool writeMid;
 int bigCharThreshold;
 int meanW;
 
@@ -154,44 +161,50 @@ extern "C" {
     Segmenter* getSegmenterInstance(char* image) {
         return new Segmenter(string(image));
     }
+    int getNSIndexLength(Segmenter *instance) {
+        return strlen(instance->getNSIndex().c_str());
+    }
     char* getNSIndex(Segmenter *instance) {
         string ns_index = instance->getNSIndex();
         int size = strlen(ns_index.c_str());
-        nsArr = new char[size + 1];
+        nsArr = new char[size+1];
         for (int i = 0; i < size; i++) {
             nsArr[i] = ns_index.c_str()[i];
         }
-        nsArr[size] = '\0';
+        nsArr[size] = '\x00';
         return nsArr;
+    }
+    int getOtherIndexLength(Segmenter *instance) {
+        return strlen(instance->getSIndex().c_str());
     }
     char* getSIndex(Segmenter *instance) {
         string s_index = instance->getSIndex();
         int size = strlen(s_index.c_str());
-        sArr = new char[size + 1];
+        sArr = new char[size+1];
         for (int i = 0; i < size; i++) {
             sArr[i] = s_index.c_str()[i];
         }
-        sArr[size] = '\0';
+        sArr[size] = '\x00';
         return sArr;
     }
     char* getRIndex(Segmenter *instance) {
         string r_index = instance->getRIndex();
         int size = strlen(r_index.c_str());
-        rArr = new char[size + 1];
+        rArr = new char[size+1];
         for (int i = 0; i < size; i++) {
             rArr[i] = r_index.c_str()[i];
         }
-        rArr[size] = '\0';
+        rArr[size] = '\x00';
         return rArr;
     }
     char* getSRIndex(Segmenter *instance) {
         string sr_index = instance->getSRIndex();
         int size = strlen(sr_index.c_str());
-        srArr = new char[size + 1];
+        srArr = new char[size+1];
         for (int i = 0; i < size; i++) {
             srArr[i] = sr_index.c_str()[i];
         }
-        srArr[size] = '\0';
+        sArr[size] = '\x00';
         return srArr;
     }
     void destroySegmenterInstance(Segmenter* instance) {

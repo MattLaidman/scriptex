@@ -54,14 +54,14 @@ def run_scriptex(infile, outfile):
     # Recognize symbols
     model = nm.Model('recognizer/model/model')
     if numimages != 0:
-        markup = model.run_model(rawimages, [0]*numimages)
+        markup = model.run_model(rawimages)
     del model
 
     genDocument(markup, nsindex, sindex, rindex, srindex)
 
 
-def genDocument(charIndex, spaceLineIndex, scriptIndex, resegIndex, sqrtIndex):
-    with open(OUTFILE, 'w+') as outFile:
+def genDocument (charIndex, spaceLineIndex, scriptIndex, resegIndex, sqrtIndex):
+    with open('texOut\\out.tex', 'w+') as outFile:
 
         #variables for the tex writing
         openScriptBraces = 0
@@ -112,11 +112,11 @@ def genDocument(charIndex, spaceLineIndex, scriptIndex, resegIndex, sqrtIndex):
                         outFile.write('}')
                 elif scriptTemp < 0:        #subscripting
                     if scriptTemp < currScriptLoc:
-                        currScriptLoc += 1
+                        currScriptLoc -= 1
                         openScriptBraces += 1
                         outFile.write('\\textsubscript{')
                     elif scriptTemp > currScriptLoc:
-                        currScript -= 1
+                        currScript += 1
                         openScriptBraces -= 1
                         outFile.write('}')
                 else:                       #close any open scripting braces
@@ -128,18 +128,27 @@ def genDocument(charIndex, spaceLineIndex, scriptIndex, resegIndex, sqrtIndex):
                 #resegment check
                 resegTemp = int(resegIndex[charLoc])
                 if resegTemp == 2:
+                    if (inFraction or inSummation or inIntegral or inLimit or inProduct):
+                        for braces in range(openResegBraces):
+                            outFile.write('}')
+                        openResegBraces = 0
+                        inFraction = False
+                        inSummation = False
+                        inIntegral = False
+                        inLimit = False
+                        inProduct = False
                     #Find out what the resegment is and open it
                     tempLoc = charLoc
                     #priority check for limit
-                    if charLoc+2 < (len(charIndex)-1) and (characterSet[int(charIndex[charLoc])] + characterSet[int(charIndex[charLoc+1])] + characterSet[int(charIndex[charLoc+2])]) == 'lim':
+                    if (charLoc+2 < len(charIndex)) and ((characterSet[int(charIndex[charLoc])] + characterSet[int(charIndex[charLoc+1])] + characterSet[int(charIndex[charLoc+2])]) == 'lim'):
                         inLimit = True
                         limCount = 3
                         toWrite = '\\lim\limits_{'
                     else:
                         #check for anyother resegs if limit failed 
-                        for location in range(tempLoc, len(resegIndex)):
+                        for location in range(tempLoc+1, len(resegIndex)):
                             temp = int(charIndex[location])
-                            if int(resegIndex[location]) == 0:
+                            if int(resegIndex[location]) == 0 or int(resegIndex[location]) == 2 :
                                 break
                             elif temp == 120: #Fraction
                                 inFraction = True
@@ -164,12 +173,17 @@ def genDocument(charIndex, spaceLineIndex, scriptIndex, resegIndex, sqrtIndex):
                     for braces in range(openResegBraces):
                         outFile.write('}')
                     openResegBraces = 0
+                    inFraction = False
+                    inSummation = False
+                    inIntegral = False
+                    inLimit = False
+                    inProduct = False
                     if inMathMode and not(inFraction or inSummation or inIntegral or inLimit or inProduct or inSqrt):
                         outFile.write('$')
                         inMathMode = False
                 #squareroot check
                 tempSqrt = int(sqrtIndex[charLoc])
-                if tempSqrt == 2 and int(charIndex[charLoc]) == 123:
+                if tempSqrt == 2 and int(charIndex[charLoc]) == 124:
                     #begin a sqrt, first check if mathmode must be started
                     if not inMathMode:
                         outFile.write('$')
@@ -182,6 +196,7 @@ def genDocument(charIndex, spaceLineIndex, scriptIndex, resegIndex, sqrtIndex):
                     for braces in range(openSqrtBraces):
                         outFile.write('}')
                     openSqrtBraces = 0
+                    inSqrt = False
                     if inMathMode and not(inFraction or inSummation or inIntegral or inLimit or inSqrt or inProduct):
                         outFile.write('$')
                         inMathMode = False
@@ -198,10 +213,12 @@ def genDocument(charIndex, spaceLineIndex, scriptIndex, resegIndex, sqrtIndex):
                     limCount -= 1
                 elif inProduct and tempIndex == 125:            #ignore UC pi if in a product
                     outFile.write('}_{')
-                elif ((62 <= tempIndex <= 89) or (113 <= tempIndex <= 119) or (tempIndex in (95, 96, 101, 102, 122, 123))) and not inMathMode:   #special mathMode cases
-                    outFile.write('$', characterSet[tempIndex], ' $')
-                elif tempIndex != 123:                          #ignore sqrt symbol in all cases
-                   outFile.write(characterSet[tempIndex])
+                elif ((62 <= tempIndex <= 89) or (113 <= tempIndex <= 119) or (tempIndex in (95, 96, 97, 101, 102, 120, 121, 122, 123, 125))) and not inMathMode:   #special mathMode cases
+                    outFile.write('$')
+                    outFile.write(characterSet[tempIndex])
+                    outFile.write('$')
+                elif tempIndex != 124:                          #ignore sqrt symbol in all cases
+                    outFile.write(characterSet[tempIndex])
                 charLoc += 1
             #put a space in TeX file
             else:
@@ -314,7 +331,7 @@ characterSet[93] = '\\'
 characterSet[94] = '='
 characterSet[95] = '\\neq '
 characterSet[96] = '\\simeq '
-characterSet[97] = '|'
+characterSet[97] = '\\vert '
 characterSet[98] = '%'
 characterSet[99] = '<'
 characterSet[100] = '>'
@@ -337,7 +354,7 @@ characterSet[116] = '\\notin '
 characterSet[117] = '\\rightarrow '
 characterSet[118] = '\\leftarrow '
 characterSet[119] = '\\emptyset '
-characterSet[120] = '\\frac'
+characterSet[120] = '\\frac{}{}'
 characterSet[121] = '\\int'
 characterSet[122] = '\\infty '
 characterSet[123] = '\\pm '
@@ -350,4 +367,4 @@ if __name__ == '__main__':
     INFILE = sys.argv[1]
     OUTFILE = INFILE.split('.')[0]+ '.tex'
     run_scriptex(INFILE, OUTFILE)
-shutil.rmtree(TEMPFOLDER)
+# shutil.rmtree(TEMPFOLDER)

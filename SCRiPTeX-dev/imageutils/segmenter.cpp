@@ -10,6 +10,7 @@
  *
  * @param img - file to segment */
 Segmenter::Segmenter(string img) {
+	writeMid = false;
 	train = false; // flag for training; T is training mode
 	release = true; // flag for release; T is release vers.
 	vector<vector<int> > image = decodeImage(img); // infile
@@ -18,7 +19,7 @@ Segmenter::Segmenter(string img) {
 		indexHandler(listChars); // do not do indices if training
 	}
 	postProcessHandler(listChars); // postprocess images
-	if (!release) {
+	if (!release) { // if release version, don't print diagnostic indices'
 		cout << "NS: " << nsIndex.str() << endl;
 		cout << "S: " << sIndex.str() << endl;
 		cout << "R: " << rIndex.str() << endl;
@@ -26,18 +27,22 @@ Segmenter::Segmenter(string img) {
 	}
 }
 
+// returns ns-index to python driver
 string Segmenter::getNSIndex() {
 	return nsIndex.str();
 }
 
+// returns s-index to python driver
 string Segmenter::getSIndex() {
 	return sIndex.str();
 }
 
+// returns r-index to python driver
 string Segmenter::getRIndex() {
 	return rIndex.str();
 }
 
+// returns sr-index to python driver
 string Segmenter::getSRIndex() {
 	return srIndex.str();
 }
@@ -58,7 +63,7 @@ vector<vector<int> > Segmenter::decodeImage(string images) {
 	for (string images; iss >> images ; ) {
 		tokens.push_back(images);
 	}
-	Decoder decoder(tokens);
+	Decoder decoder(tokens, true);
 	vector<vector<int> > decodedVector = decoder.getImage();
 	flipImage(decodedVector);
 	return decodedVector;
@@ -104,7 +109,11 @@ void Segmenter::writePGM(vector<vector<int> > &input, int ypos, int fileNum) {
 	imageOutput << "1" << "\n"; // depth, third header
 	for (unsigned int i = 0; i < input[0].size(); i++) {
 		for (unsigned int j = 0; j < input.size(); j++) {
-			imageOutput << input[j][i] << " "; // insert pixel value
+			if (writeMid && i > (unsigned int)ypos-5 && i < (unsigned int)ypos+5) {
+				imageOutput << 0 << " ";
+			} else {
+				imageOutput << input[j][i] << " "; // insert pixel value
+			}
 		}
 		imageOutput << "\n";
 	}
@@ -133,21 +142,19 @@ void Segmenter::segmentHandler(vector<vector<int> > &input) {
 * @param lineNum - the number of the line
 * @param r = r-index of characters segmentable from line
 * @param sr = sr-index of characters segmentable from line */
-void Segmenter::segmentIntoLines(vector<vector<int> > &input, unsigned int lineNum, unsigned int r, unsigned int sr) {
+void Segmenter::segmentIntoLines(vector<vector<int> > &input, 
+								unsigned int lineNum, unsigned int r, 
+								unsigned int sr) {
 	// theshold to ignore black pixels as noise
 	int threshold = findVerThreshold(input);
 	vector<int> verDist = findVerDistribution(input, threshold); // init dist
 	unsigned int i, j = 0, k, l;
 	while (j < input[0].size()) {
 		// iterate until you find a row containing black
-		for (i = j; i < verDist.size(); i++) {
-			if (verDist[i] > threshold) { break; } // i is start point
-		}
+		for (i = j; verDist[i] <= threshold; i++);
 		// iterate until you find a row containing no black
-		for (j = i; j < verDist.size(); j++) {
-			if (verDist[j] <= threshold) { break; } // j is end point
-		}
-		if (j - i > 5*(unsigned int)threshold) { // if tall enough
+		for (j = i; verDist[j] > threshold; j++);
+		if (j - i > (unsigned int)threshold) { // if tall enough
 			vector<vector<int> > lineImage(input.size(), vector<int>(j - i));
 			for (k = 0; k < j - i; k++) {
 				for (l = 0; l < input.size(); l++) {
@@ -170,22 +177,20 @@ void Segmenter::segmentIntoLines(vector<vector<int> > &input, unsigned int lineN
 * @param lineNum - the line number a character was found on
 * @param r - the r-index of segmented character
 * @param sr - the sr-index of segmented character */
-void Segmenter::segmentIntoChars(vector<vector<int> > &input, unsigned int lineNum, unsigned int r, unsigned int sr) {
+void Segmenter::segmentIntoChars(vector<vector<int> > &input, 
+								unsigned int lineNum, unsigned int r, 
+								unsigned int sr) {
 	// theshold to ignore black pixels as noise
-	int threshold = findHorThreshold(input);
-	threshold *= (sr > 0) ? 1.5 : 1; // bump up threshold for SR
+	int threshold = (sr == 0) ? findHorThreshold(input) : findPenWidth(input);
+	threshold = (r == 0) ? threshold : 1;
 	vector<int> horDist = findHorDistribution(input, threshold); // init dist
 	unsigned int i, j = 0, k, l;
 	while (j < input.size()) {
 		// iteratre until you find a column containing black
-		for (i = j; i < horDist.size(); i++) {
-			if (horDist[i] > threshold) { break; } // i is start point
-		}
+		for (i = j; horDist[i] <= threshold && i < horDist.size(); i++);
 		// iterate until you find a column containing no black
-		for (j = i; j < horDist.size(); j++) {
-			if (horDist[j] <= threshold) { break; } // j is end point
-		}
-		if (j - i > 5*(unsigned int)threshold) { // if wide enough
+		for (j = i; horDist[j] > threshold && j < horDist.size(); j++);
+		if (j - i > (unsigned int)threshold) { // if wide enough
 			// new image for the segmented char
 			vector<vector<int> > charImage(j - i, vector<int>(input[0].size()));
 			for (k = 0; k < input[0].size(); k++) {
@@ -193,32 +198,32 @@ void Segmenter::segmentIntoChars(vector<vector<int> > &input, unsigned int lineN
 					charImage[l][k] = input[l + i][k]; // init new image
 				}
 			}
-			int area = findArea(charImage, threshold); // area of character
+			vector<vector<int> > tempVector = trimChars(charImage);
+			int area = tempVector.size() * tempVector[0].size();
 			// check for constituent lines in character (R > 0)
-			//cout << area << endl;
-			// cout << threshold << endl;
-			// cout << findNumChars(charImage, 20*threshold) << endl;
 			if (!train && r == 0 && !tempList.empty() // if nonfirst element
-			&& findNumLines(charImage, 3) > 1 // if constituent lines
-			&& area > (meanArea(tempList) + 2*sdArea(tempList))) { // if sufficiently big
+			&& findNumLines(charImage, 1) > 1 // if constituent lines
+			&& tempVector[0].size() > (meanHeight(tempList) * 2)) { // if sufficiently big
 				firstR = true; // set so first R = 2
 				segmentIntoLines(charImage, lineNum, 1, sr); // resegment
 			// check for constituent characters in character (SR > 0)
 			} else if (!train && sr == 0 && !tempList.empty() // if nonfirst element
-			&& findNumChars(charImage, 30*threshold) > 1 // if constituent chars
-			&& area > (meanArea(tempList) + 2*sdArea(tempList))) { // if sufficiently big
+			&& findNumChars(charImage, 10*threshold) > 1 // if constituent chars
+			&& tempVector.size() > (meanWidth(tempList) * 1.75)) { // if sufficiently big
 				firstSR = true; // so set first SR = 2
 				segmentIntoChars(charImage, lineNum, r, 1); // resegment
 			} else { // otherwise go as normal
 				// append new character with characteristics to list
 				int xP = floor((i + j)/2); // x-midpoint of char
-				int yP = findYPos(charImage); // y-midpoint of char`
+				int yP = findYPos(charImage); // y-midpoint of char
+				int he = tempVector[0].size(); // height of char
+				int wi = tempVector.size(); // width of char
 				int pos[2] = {xP, yP}; // position of character relative to line
 				int rAdd = (firstR) ? 1 : 0; // is it start of R sequence?
 				int srAdd = (firstSR) ? 1 : 0; // is it start of SR sequence?
 				CharacterData newCharData; // empty CharacterData
 				// then populate it with attributes
-				newCharData.setPixels(charImage, pos, area, lineNum, r+rAdd, sr+srAdd);
+				newCharData.setPixels(charImage, pos, area, wi, he, lineNum, r+rAdd, sr+srAdd);
 				tempList.push_back(newCharData); // append character to end of list
 				firstR = false; // to ensure subsequent R is 1
 				firstSR = false; // to ensure subsequent SR is 1
@@ -335,13 +340,9 @@ int Segmenter::findNumChars(vector<vector<int> > &input, double thresh) {
 	unsigned int i, j = 0;
 	int numChars = 0;
 	while (j < input.size()) {
-		for (i = j; i < horDist.size(); i++) {
-			if (horDist[i] > thresh) { break; } // find start of char
-		}
-		for (j = i; j < horDist.size(); j++) {
-			if (horDist[j] <= thresh) { break; } // find end of char
-		}
-		if (j - i > 3*(unsigned int)thresh) { // if sufficiently big
+		for (i = j; horDist[i] <= thresh && i < horDist.size(); i++);// find start of char
+		for (j = i; horDist[j] > thresh && j < horDist.size(); j++); // find end of char
+		if (j - i > 0.2*(unsigned int)thresh) { // if sufficiently big
 			numChars++; // inc counter
 		}
 	}
@@ -358,17 +359,35 @@ int Segmenter::findNumLines(vector<vector<int> > &input, int thresh) {
 	unsigned int i, j = 0;
 	int numLines = 0;
 	while (j < input[0].size()) {
-		for (i = j; i < verDist.size(); i++) {
-			if (verDist[i] > thresh) { break; } // find start of line
-		}
-		for (j = i; j < verDist.size(); j++) {
-			if (verDist[j] <= thresh) { break; } // find end of line
-		}
-		if (j - i > 3*(unsigned int)thresh) { // if sufficiently big
+		for (i = j; verDist[i] <= thresh && i < verDist.size(); i++); // find start of line
+		for (j = i; verDist[j] > thresh && j < verDist.size(); j++); // find end of line
+		if (j - i > 2*(unsigned int)thresh) { // if sufficiently big
 			numLines++; // inc counter
 		}
 	}
 	return numLines;
+}
+
+/* function to find an approximate pen stroke width.
+ * this metric is useful as it allows for easy segmentation
+ * of square roots. 
+ *
+ * @param input - the character to find pen width on
+ * @return the pen width */
+int Segmenter::findPenWidth(vector<vector<int> > &input) {
+	vector<int> horDist = findHorDistribution(input, 0);
+	int highestMinimum = 0;
+	/* check the last few columns of the image and
+	 * sum the inked pixel frequency: the mean of this
+	 * is assumed to be the pen stroke width */
+	for (unsigned int j = 0; j < 5; j++) {
+		highestMinimum = max(highestMinimum, horDist[(horDist.size() - j)-1]);
+	}
+	/* this value is:
+	 * not 1, minor variance in pen width may screw it up
+	 * not 2, as it will screw up minuses, equals, etc
+	 * 1.5 as it is between these two */
+	return ceil(highestMinimum*1.5);
 }
 
 /******************************************************************
@@ -383,6 +402,10 @@ int Segmenter::findNumLines(vector<vector<int> > &input, int thresh) {
 void Segmenter::postProcessHandler(list<CharacterData> &inList) {
 	int j = 0;
 	for (auto i : inList) { // foreach
+		// if potential SR, remove top line
+		if (i.getSR() == 1 && findNumLines(i.getPix(), 0) > 1) {
+			removeTopLine(i.getPix());
+		}
 		normalizeAspect(i.getPix()); // set to 1:1 aspect (square)
 		writePGM(i.getPix(), i.getPos()[1], j); // write PGM
 		j++;
@@ -457,7 +480,6 @@ void Segmenter::affixWhiteCols(vector<vector<int> > &input, int dimDiff) {
 	input = temp; // mutate
 }
 
-
 /* function to flip input image to appropriate "look"
  * input from decoder is mirrored along the diagonal axis
  * and needs to be set to normal before it can be segmented
@@ -475,6 +497,49 @@ void Segmenter::flipImage(vector<vector<int> > &input) {
 	input = temp; // mutate
 }
 
+/* function to remove the top bar from square rooted
+ * characters. The top bar kills recognition, so it must
+ * be removed. Mutates input
+ *
+ * @param input - the character to remove top line on */
+void Segmenter::removeTopLine(vector<vector<int> > &input) {
+	vector<int> verDist = findVerDistribution(input, 0);
+	unsigned int i = 0;
+	// find point where black pixels begins
+	for (; verDist[i] == 0 && i < verDist.size(); i++);
+	// find point where black pixels end
+	for (; verDist[i] > 0 && i < verDist.size(); i++) {
+		for (unsigned int j = 0; j < input.size(); j++) {
+			input[j][i] = 1; // make them white
+		}
+	}
+}
+
+/* function to find absolute closest dimensions to black
+ * pixels in a character. Equivalent to an earlier function which
+ * trimmed characters.
+ *
+ * @param input - the character to find area, height, etc on
+ * @return a vector with as close to pixels as possible */
+vector<vector<int> > Segmenter::trimChars(vector<vector<int> > input) {
+	vector<int> verDist = findVerDistribution(input, 0);
+	int actualHeight = verDist.size(); // find initial height
+	unsigned int i = 0, j = verDist.size()-1;
+	/* iterate over distribution to find a row with inked
+	 * pixels, decreasing height as you go */
+	for (; verDist[i] == 0; i++, actualHeight--);
+	// same as above but start from bottom
+	for (; verDist[j] == 0; j--, actualHeight--);
+	// make a temporary vector to return
+	vector<vector<int> > temp(input.size(), vector<int>(actualHeight));
+	for (unsigned int k = 0; k < temp[0].size(); k++) {
+		for (unsigned int l = 0; l < temp.size(); l++) {
+			temp[l][k] = input[l][i+k]; // init new vector
+		}
+	}
+	return temp; // does not mutate input
+}
+
 /******************************************************************
 *
 * Index Generation Functions
@@ -490,7 +555,7 @@ void Segmenter::indexHandler(list<CharacterData> &inList) {
 	int c = 0; // counter
 	CharacterData j, k; // k is anchor character
 	// init threshold for scripts (big characters)
-	bigCharThreshold = meanHeight(listChars) + 0.1*sdHeight(listChars);
+	bigCharThreshold = meanHeight(listChars);
 	// init mean width global var
 	meanW = meanWidth(inList);
 	/* I do the above because these values are needed in
@@ -546,14 +611,17 @@ void Segmenter::createSRIndex(CharacterData &input) {
 	srIndex << input.getSR() << " "; // trait found earlier, just append it
 }
 
-int ite = 1;
-
 /* function to create S-Index over all characters
  *
  * @param a - character n
  * @param b - character n-1
  * @param k - anchor character k */
 void Segmenter::createSIndex(CharacterData &a, CharacterData &b, CharacterData &k) {
+	int lowerA[2] = {a.getPos()[0], a.getPos()[1]+a.getHeight()/2};
+	//int lowerB[2] = {b.getPos()[0], b.getPos()[1]+b.getHeight()/2};
+	int lowerK[2] = {k.getPos()[0], k.getPos()[1]+k.getHeight()/2};
+	//double lowermn = round(1000*findSlope(lowerA, lowerB))/1000;
+	double lowermk = round(1000*findSlope(lowerA, lowerK))/1000;
 	// slope between n and n-1
 	double mn = round(1000*findSlope(a.getPos(), b.getPos()))/1000;
 	// slope between n and k
@@ -561,13 +629,15 @@ void Segmenter::createSIndex(CharacterData &a, CharacterData &b, CharacterData &
 	/* if entering an R or SR, or char n is too big, or in
 	 * chain but it needs to be broken, break chain */
 	if (b.getR() == a.getR() && b.getSR() == a.getSR()
-	&& a.getHeight() < bigCharThreshold
-	&& !(kFlag && abs(mk) < 0.4)) {
+	&& a.getHeight() < bigCharThreshold && a.getPos()[0] > b.getPos()[0]
+	&& !(kFlag && (abs(mk) < 0.4 && abs(lowermk) < 0.4))) {
 		if (abs(mn) > 0.4) { // if slope (n,n-1) is big enough
 			if (mn <= 0) { // if negative
 				a.setS(b.getS() + 1); // its a superscript
-			} else { // if positive
+			} else if (mn > 0) { // if positive
 				a.setS(b.getS() - 1); // its a subscript
+			} else {
+				a.setS(b.getS());
 			}
 		} else { // otherwise
 			a.setS(b.getS()); // keep chain going
@@ -577,10 +647,6 @@ void Segmenter::createSIndex(CharacterData &a, CharacterData &b, CharacterData &
 		kFlag = false; // disable anchoring
 	}
 	sIndex << a.getS() << " "; // append degree to index
-	/* if (a.getS() != 0) {
-		cout << ite << ": " << a.getHeight() << " < " << bigCharThreshold << endl;
-	}
-	ite++; */
 }
 
 /******************************************************************
@@ -589,39 +655,32 @@ void Segmenter::createSIndex(CharacterData &a, CharacterData &b, CharacterData &
 *
 ******************************************************************/
 
-/* function to find the y-center of a character
+/* function to find the weighted y-center of a character
  *
  * @param in - the character to find for
  * @return the y-center */
 int Segmenter::findYPos(vector<vector<int> > &in) {
-	vector<int> verDist = findVerDistribution(in, 1);
-	int whiteTop = 0; // white top rows
-	int whiteBottom = verDist.size()-1; // white bottom rows
-	// shrink the range to encapsulate character
-	while (verDist[whiteTop] == 0) {
-		whiteTop++;
+	/* as the distribution of inked pixels is a discrete sequence
+	 * we can find the area under this curve by summing
+	 * the frequency of inked pixels (y-axis of the distribution graph) */
+	vector<int> verDist = findVerDistribution(in, 0);
+	int sum = 0; // for summation
+	unsigned int j = 0; // the tentative y-center
+	for (int i : verDist) {
+		sum += i; // add up the distribution values
 	}
-	while (verDist[whiteBottom] == 0) {
-		whiteBottom--;
+	/* if you then find half of the area, you can
+	 * find the x-value at which you reach half. this
+	 * constitutes the weighted middle */
+	sum /= 2;
+	// subtract from half of sum until you hit zero
+	for (; sum > 0; j++) {
+		sum -= verDist[j];
 	}
-	// find the middle point
-	return floor((whiteBottom+whiteTop)/2);
-}
-
-/* function to find the area of a character
- *
- * @param in - the character to find area
- * @param threshold - the noise threshold
- * @return the area */
-int Segmenter::findArea(vector<vector<int> > &in, int threshold) {
-	vector<int> verDist = findVerDistribution(in, threshold);
-	int counter = 0;
-	for (unsigned int i = 0; i < verDist.size(); i++) {
-		if (verDist[i] > threshold) {
-			counter++;
-		}
-	}
-	return in.size() * counter;
+	/* at this point you have the weighted midpoint, or the midpoint
+	 * along a character's height with consideration for the density
+	 * of pixels at a certain height */
+	return j;
 }
 
 /* function to find the slope of the lineImage
@@ -647,7 +706,7 @@ int Segmenter::getDistance(int x1, int x2) {
  *
  * @param inList - the list of characters to find mean on
  * @return the mean area */
-int Segmenter::meanArea(list<CharacterData> &inList) {
+unsigned int Segmenter::meanArea(list<CharacterData> &inList) {
 	unsigned long long int totalArea = 0;
 	for (auto i : inList) { // foreach
 		totalArea += i.getArea(); // sum area
@@ -659,7 +718,7 @@ int Segmenter::meanArea(list<CharacterData> &inList) {
  *
  * @param inList - the list of characters to find SD on
  * @return the standard deviation */
-int Segmenter::sdArea(list<CharacterData> &inList) {
+unsigned int Segmenter::sdArea(list<CharacterData> &inList) {
 	int mean = meanArea(inList); // need mean
 	unsigned long long int totalSubvariance = 0; // total subvariance
 	for (auto i : inList) { // foreach
@@ -673,7 +732,7 @@ int Segmenter::sdArea(list<CharacterData> &inList) {
  *
  * @param inList - the list of characters to find mean width
  * @return the mean width */
-int Segmenter::meanWidth(list<CharacterData> &inList) {
+unsigned int Segmenter::meanWidth(list<CharacterData> &inList) {
 	unsigned long long int totalWidth = 0;
 	for (auto i : inList) { // foreach
 		totalWidth += i.getWidth(); // sum widths
@@ -685,7 +744,7 @@ int Segmenter::meanWidth(list<CharacterData> &inList) {
  *
  * @param inList - the list of chars to find SD width on
  * @return the SD */
-int Segmenter::sdWidth(list<CharacterData> &inList) {
+unsigned int Segmenter::sdWidth(list<CharacterData> &inList) {
 	int mean = meanWidth(inList); // find mean width
 	unsigned long long int totalSubvariance = 0; // total subvariance
 	for (auto i : inList) { // foreach
@@ -699,18 +758,26 @@ int Segmenter::sdWidth(list<CharacterData> &inList) {
  *
  * @param inList - the list of characters to find mean height
  * @return the mean height */
-int Segmenter::meanHeight(list<CharacterData> &inList) {
-	// basic geometry states height = area / width
-	return meanArea(inList)/meanWidth(inList); // find average
+unsigned int Segmenter::meanHeight(list<CharacterData> &inList) {
+	unsigned long long int totalHeight = 0;
+	for (auto i : inList) { // foreach
+		totalHeight += i.getHeight(); // sum widths
+	}
+	return floor(totalHeight/inList.size()); // find average
 }
 
 /* function to find the standard deviation of heights
  *
  * @param inList - the list of chars to find SD height on
  * @return the SD */
-int Segmenter::sdHeight(list<CharacterData> &inList) {
-	// basic geometry states height = area / width
-	return sdArea(inList)/sdWidth(inList); // find sd
+unsigned int Segmenter::sdHeight(list<CharacterData> &inList) {
+	int mean = meanHeight(inList); // find mean width
+	unsigned long long int totalSubvariance = 0; // total subvariance
+	for (auto i : inList) { // foreach
+		totalSubvariance += pow(i.getHeight() - mean, 2); // sum subvariance
+	}
+	unsigned int variance = floor(totalSubvariance / inList.size()); // find variance
+	return floor(pow(variance, 0.5)); // find SD, return it
 }
 
 /******************************************************************

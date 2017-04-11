@@ -34,25 +34,53 @@ class PySegmenter:
         """
         Return the nsindex
         """
-        return str(SEGMENTER.getNSIndex(self._segmenterinst).decode('UTF-8'))
+        ret = ""
+        ind = SEGMENTER.getNSIndex(self._segmenterinst)
+
+        for character in ind:
+            if character == 0:
+                break
+            ret = ret + chr(character)
+        return ret
 
     def get_sindex(self):
 
         """
         Return the sindex
         """
-        return str(SEGMENTER.getSIndex(self._segmenterinst).decode('UTF-8'))
+        ret = ""
+        ind = SEGMENTER.getSIndex(self._segmenterinst)
+
+        for character in ind:
+            if character == 0:
+                break
+            ret = ret + chr(character)
+        return ret
 
     def get_rindex(self):
 
         """
         Return the rindex
         """
-        return str(SEGMENTER.getRIndex(self._segmenterinst).decode('UTF-8'))
+        ret = ""
+        ind = SEGMENTER.getRIndex(self._segmenterinst)
+
+        for character in ind:
+            if character == 0:
+                break
+            ret = ret + chr(character)
+        return ret
 
     def get_srindex(self):
 
         """
         Return the srindex
         """
-        return str(SEGMENTER.getSRIndex(self._segmenterinst).decode('UTF-8'))
+        ret = ""
+        ind = SEGMENTER.getSRIndex(self._segmenterinst)
+
+        for character in ind:
+            if character == 0:
+                break
+            ret = ret + chr(character)
+        return ret
